@@ -31,130 +31,79 @@
 
  */
 
-/*
-  Arduino Uno connections:
-
-  See nRF24LE1 Product Specification for corresponding pin numbers.
-
-  NOTE: nRF24LE1 is a 3.3V device.  Level converters are required to connect it to a
-  5V Arduino.
-
- * D00: Serial RX
- * D01: Serial TX
- * D02:
- *~D03:
- * D04:
- *~D05:
- *~D06:
- * D07: nRF24LE1 UART/RXD
- * D08: nRF24LE1 PROG
- *~D09: nRF24LE1 _RESET_
- *~D10: nRF24LE1 FCSN, nRF24LE1 UART/TXD
- *~D11: SPI MOSI, nRF24LE1 FMOSI
- * D12: SPI MISO, nRF24LE1 FMISO
- * D13: SPI SCK, On board Status LED, nRF24LE1 FSCK
- * A0:
- * A1:
- * A2:
- * A3:
- * A4: I2C SDA
- * A5: I2C SCL
- * 5V:
- * 3.3V: nRF24LE1 VDD
- * AREF:
- * GND:  nRF24LE1 VSS
-
- (~ PWM)
-
- Interupts:
- 0:
- 1:
-
- Pin-Mapping:
- Arduino	24Pin		32Pin		48Pin
- D07 (RXD)	12 P0.6		10 P0.4		15 P1.1
- D08 (PROG)	 5 PROG		 6 PROG		10 PROG
- D09 (RESET)	13 RESET	19 RESET	30 RESET
- D10 (FCSN,TXD)	11 P0.5		15 P1.1		22 P2.0
- D11 (FMOSI)	 9 P0.3		13 P0.7		19 P1.5
- D12 (FMISO)	10 P0.4		14 P1.0		20 P1.6
- D13 (FSCK)	 8 P0.2		11 P0.5 	16 P1.2
-
- */
 #include <Arduino.h>
 #include <SPI.h>
 #include "main.h"
 
 char inputRecord[521]; // Buffer for line of encoded hex data
 
-typedef struct hexRecordStruct {
-  byte   rec_data[256];
-  byte   rec_data_len;
-  word   rec_address;
-  byte   rec_type;
-  byte   rec_checksum;
-  byte   calc_checksum;
-}
-hexRecordStruct;
+typedef struct hexRecordStruct
+{
+  byte rec_data[256];
+  byte rec_data_len;
+  word rec_address;
+  byte rec_type;
+  byte rec_checksum;
+  byte calc_checksum;
+} hexRecordStruct;
 
-hexRecordStruct hexRecord;  // Decoded hex data
+hexRecordStruct hexRecord; // Decoded hex data
 
 size_t numChars;   // Serial characters received counter
 byte fsr;          // Flash status register buffer
 byte spi_data;     // SPI data transfer buffer
 byte infopage[37]; // Buffer for storing InfoPage content
 
-byte ConvertHexASCIIDigitToByte(char c){
-  if((c >= 'a') && (c <= 'f'))
-    return (c - 'a') + 0x0A;
-  else if ((c >= 'A') && (c <= 'F'))
-    return (c - 'A') + 0x0A;
-  else if ((c >= '0') && (c <= '9'))
-    return (c - '0');
-  else
-    return -1;
+void setup()
+{
+  // start serial port:
+  Serial.begin(PROG_BAUD);
+  Serial.setTimeout(30000);
+
+  // Reset nRF24LE1
+  pinMode(PROG, OUTPUT);
+  digitalWrite(PROG, LOW);
+  pinMode(_RESET_, OUTPUT);
+  digitalWrite(_RESET_, HIGH);
+  delay(10);
+  digitalWrite(_RESET_, LOW);
+  delay(10);
+  digitalWrite(_RESET_, HIGH);
+
+  nRF24LE1Serial.begin(NRF24LE1_BAUD);
 }
 
-byte ConvertHexASCIIByteToByte(char msb, char lsb){
-  return ((ConvertHexASCIIDigitToByte(msb) << 4) + ConvertHexASCIIDigitToByte(lsb));
+char serialBuffer;
+
+void loop()
+{
+
+  if (nRF24LE1Serial.available() > 0)
+  {
+    // Pass through serial data receieved from the nRF24LE1
+    Serial.write(nRF24LE1Serial.read());
+  }
+
+  if (Serial.available() > 0)
+  {
+    serialBuffer = Serial.read();
+    // Check if data received on USB serial port is the magic character to start flashing
+    if (serialBuffer == FLASH_TRIGGER)
+    {
+      nRF24LE1Serial.end();
+      flash();
+      nRF24LE1Serial.begin(NRF24LE1_BAUD);
+    }
+    else
+    {
+      // Otherwise pass through serial data received
+      nRF24LE1Serial.write(serialBuffer);
+    }
+  }
 }
 
-int ParseHexRecord(struct hexRecordStruct * record, char * inputRecord, int inputRecordLen){
-  int index = 0;
-
-  if((record == NULL) || (inputRecord == NULL)) {
-    return HEX_REC_NULL_PTR;
-  }
-
-  if(inputRecord[0] != HEX_REC_START_CODE) {
-    return HEX_REC_INVALID_FORMAT;
-  }
-
-  record->rec_data_len = ConvertHexASCIIByteToByte(inputRecord[1], inputRecord[2]);
-  record->rec_address = word(ConvertHexASCIIByteToByte(inputRecord[3], inputRecord[4]), ConvertHexASCIIByteToByte(inputRecord[5], inputRecord[6]));
-  record->rec_type = ConvertHexASCIIByteToByte(inputRecord[7], inputRecord[8]);
-  record->rec_checksum = ConvertHexASCIIByteToByte(inputRecord[9 + (record->rec_data_len * 2)], inputRecord[9 + (record->rec_data_len * 2) + 1]);
-  record->calc_checksum = record->rec_data_len + ((record->rec_address >> 8) & 0xFF) + (record->rec_address & 0xFF) + record->rec_type;
-
-  for(index = 0; index < record->rec_data_len; index++) {
-    record->rec_data[index] = ConvertHexASCIIByteToByte(inputRecord[9 + (index * 2)], inputRecord[9 + (index * 2) + 1]);
-    record->calc_checksum += record->rec_data[index];
-  }
-
-  record->calc_checksum = ~record->calc_checksum + 1;
-
-  if(record->calc_checksum != record->rec_checksum) {
-    return HEX_REC_BAD_CHECKSUM;
-  }
-
-  if (record->rec_type == HEX_REC_TYPE_EOF) {
-    return HEX_REC_EOF;
-  }
-
-  return HEX_REC_OK;
-}
-
-void flash() {
+void flash()
+{
 
   Serial.println("FLASH");
   // Initialise SPI
@@ -173,16 +122,16 @@ void flash() {
   SPI.begin();
 
   Serial.println("READY");
-  if (!Serial.find("GO ")) {
+  if (!Serial.find("GO "))
+  {
     Serial.println("TIMEOUT");
     return;
   }
 
- // Read nupp and rdismb
- byte nupp = Serial.parseInt();
- byte rdismb = Serial.parseInt();
- Serial.read();
-
+  // Read nupp and rdismb
+  byte nupp = Serial.parseInt();
+  byte rdismb = Serial.parseInt();
+  Serial.read();
 
   // Put nRF24LE1 into programming mode
   digitalWrite(PROG, HIGH);
@@ -210,7 +159,8 @@ void flash() {
   fsr = SPI.transfer(0x00);
   digitalWrite(_FCSN_, HIGH);
 
-  if (!(fsr & FSR_INFEN)) {
+  if (!(fsr & FSR_INFEN))
+  {
     Serial.println("INFOPAGE ENABLE FAILED");
     goto done;
   }
@@ -221,7 +171,8 @@ void flash() {
   SPI.transfer(READ);
   SPI.transfer(0);
   SPI.transfer(0);
-  for (int index = 0; index < 37; index++) {
+  for (int index = 0; index < 37; index++)
+  {
     infopage[index] = SPI.transfer(0x00);
   }
   digitalWrite(_FCSN_, HIGH);
@@ -241,14 +192,14 @@ void flash() {
   digitalWrite(_FCSN_, HIGH);
 
   // Check flash is ready
-  do {
+  do
+  {
     delay(60);
     digitalWrite(_FCSN_, LOW);
     SPI.transfer(RDSR);
     fsr = SPI.transfer(0x00);
     digitalWrite(_FCSN_, HIGH);
-  }
-  while (fsr & FSR_RDYN);
+  } while (fsr & FSR_RDYN);
 
   // Restore InfoPage content
   // Clear Flash MB readback protection (RDISMB)
@@ -273,21 +224,22 @@ void flash() {
   SPI.transfer(PROGRAM);
   SPI.transfer(0);
   SPI.transfer(0);
-  for (int index = 0; index < 37; index++) {
+  for (int index = 0; index < 37; index++)
+  {
     SPI.transfer(infopage[index]);
   }
   delay(1);
   digitalWrite(_FCSN_, HIGH);
 
   // Check flash is ready
-  do {
+  do
+  {
     delay(10);
     digitalWrite(_FCSN_, LOW);
     SPI.transfer(RDSR);
     fsr = SPI.transfer(0x00);
     digitalWrite(_FCSN_, HIGH);
-  }
-  while (fsr & FSR_RDYN);
+  } while (fsr & FSR_RDYN);
 
   // Verify data that was written
   Serial.println("VERFIYING INFOPAGE....");
@@ -295,9 +247,11 @@ void flash() {
   SPI.transfer(READ);
   SPI.transfer(0);
   SPI.transfer(0);
-  for (int index = 0; index < 37; index++) {
+  for (int index = 0; index < 37; index++)
+  {
     spi_data = SPI.transfer(0x00);
-    if (infopage[index] != spi_data) {
+    if (infopage[index] != spi_data)
+    {
       Serial.print("INFOPAGE VERIFY FAILED ");
       Serial.print(index);
       Serial.print(": WROTE ");
@@ -329,24 +283,27 @@ void flash() {
   fsr = SPI.transfer(0x00);
   digitalWrite(_FCSN_, HIGH);
 
-  if (fsr & FSR_INFEN) {
+  if (fsr & FSR_INFEN)
+  {
     Serial.println("INFOPAGE DISABLE FAILED");
     goto done;
   }
 
-
-  while(true){
+  while (true)
+  {
     // Prompt perl script for data
     Serial.println("OK");
 
     numChars = Serial.readBytesUntil('\n', inputRecord, 512);
 
-    if (numChars == 0) {
+    if (numChars == 0)
+    {
       Serial.println("TIMEOUT");
       goto done;
     }
 
-    switch (ParseHexRecord(&hexRecord, inputRecord, numChars)){
+    switch (ParseHexRecord(&hexRecord, inputRecord, numChars))
+    {
     case HEX_REC_OK:
       break;
     case HEX_REC_ILLEGAL_CHARS:
@@ -373,14 +330,14 @@ void flash() {
     digitalWrite(_FCSN_, HIGH);
 
     // Check flash is ready
-    do {
+    do
+    {
       delay(10);
       digitalWrite(_FCSN_, LOW);
       SPI.transfer(RDSR);
       fsr = SPI.transfer(0x00);
       digitalWrite(_FCSN_, HIGH);
-    }
-    while (fsr & FSR_RDYN);
+    } while (fsr & FSR_RDYN);
 
     // Program flash
     Serial.println("WRITING...");
@@ -388,22 +345,22 @@ void flash() {
     SPI.transfer(PROGRAM);
     SPI.transfer(highByte(hexRecord.rec_address));
     SPI.transfer(lowByte(hexRecord.rec_address));
-    for (int index = 0; index < hexRecord.rec_data_len; index++) {
+    for (int index = 0; index < hexRecord.rec_data_len; index++)
+    {
       SPI.transfer(hexRecord.rec_data[index]);
     }
     delay(1);
     digitalWrite(_FCSN_, HIGH);
 
-
     // Wait for flash to write
-    do {
-      delay(hexRecord.rec_data_len);  // Wait 1 millisecond per byte written
+    do
+    {
+      delay(hexRecord.rec_data_len); // Wait 1 millisecond per byte written
       digitalWrite(_FCSN_, LOW);
       SPI.transfer(RDSR);
       fsr = SPI.transfer(0x00);
       digitalWrite(_FCSN_, HIGH);
-    }
-    while (fsr & FSR_RDYN);
+    } while (fsr & FSR_RDYN);
 
     // Read back flash to verify
     Serial.println("VERIFYING...");
@@ -411,9 +368,11 @@ void flash() {
     SPI.transfer(READ);
     SPI.transfer(highByte(hexRecord.rec_address));
     SPI.transfer(lowByte(hexRecord.rec_address));
-    for (int index = 0; index < hexRecord.rec_data_len; index++) {
+    for (int index = 0; index < hexRecord.rec_data_len; index++)
+    {
       spi_data = SPI.transfer(0x00);
-      if ( spi_data != hexRecord.rec_data[index]) {
+      if (spi_data != hexRecord.rec_data[index])
+      {
         Serial.print("FAILED ");
         Serial.print(hexRecord.rec_address + index);
         Serial.print(": ");
@@ -425,7 +384,6 @@ void flash() {
       }
     }
     digitalWrite(_FCSN_, HIGH);
-
   }
 
 done:
@@ -438,49 +396,62 @@ done:
   SPI.end();
 
   Serial.println("DONE");
-
 }
 
-void setup() {
-  // start serial port:
-  Serial.begin(57600);
-  Serial.setTimeout(30000);
-
-  // Reset nRF24LE1
-  pinMode(PROG, OUTPUT);
-  digitalWrite(PROG, LOW);
-  pinMode(_RESET_, OUTPUT);
-  digitalWrite(_RESET_, HIGH);
-  delay(10);
-  digitalWrite(_RESET_, LOW);
-  delay(10);
-  digitalWrite(_RESET_, HIGH);
-
-
-  nRF24LE1Serial.begin(NRF24LE1_BAUD);
-
-
+byte ConvertHexASCIIDigitToByte(char c)
+{
+  if ((c >= 'a') && (c <= 'f'))
+    return (c - 'a') + 0x0A;
+  else if ((c >= 'A') && (c <= 'F'))
+    return (c - 'A') + 0x0A;
+  else if ((c >= '0') && (c <= '9'))
+    return (c - '0');
+  else
+    return -1;
 }
 
-char serialBuffer;
+byte ConvertHexASCIIByteToByte(char msb, char lsb)
+{
+  return ((ConvertHexASCIIDigitToByte(msb) << 4) + ConvertHexASCIIDigitToByte(lsb));
+}
 
-void loop() {
+int ParseHexRecord(struct hexRecordStruct *record, char *inputRecord, int inputRecordLen)
+{
+  int index = 0;
 
-  if (nRF24LE1Serial.available() > 0) {
-    // Pass through serial data receieved from the nRF24LE1
-    Serial.write(nRF24LE1Serial.read());
+  if ((record == NULL) || (inputRecord == NULL))
+  {
+    return HEX_REC_NULL_PTR;
   }
 
-  if (Serial.available() > 0) {
-    serialBuffer = Serial.read();
-    // Check if data received on USB serial port is the magic character to start flashing
-    if (serialBuffer == FLASH_TRIGGER) {
-      nRF24LE1Serial.end();
-      flash();
-      nRF24LE1Serial.begin(NRF24LE1_BAUD);
-    } else {
-      // Otherwise pass through serial data received
-      nRF24LE1Serial.write(serialBuffer);
-    }
+  if (inputRecord[0] != HEX_REC_START_CODE)
+  {
+    return HEX_REC_INVALID_FORMAT;
   }
+
+  record->rec_data_len = ConvertHexASCIIByteToByte(inputRecord[1], inputRecord[2]);
+  record->rec_address = word(ConvertHexASCIIByteToByte(inputRecord[3], inputRecord[4]), ConvertHexASCIIByteToByte(inputRecord[5], inputRecord[6]));
+  record->rec_type = ConvertHexASCIIByteToByte(inputRecord[7], inputRecord[8]);
+  record->rec_checksum = ConvertHexASCIIByteToByte(inputRecord[9 + (record->rec_data_len * 2)], inputRecord[9 + (record->rec_data_len * 2) + 1]);
+  record->calc_checksum = record->rec_data_len + ((record->rec_address >> 8) & 0xFF) + (record->rec_address & 0xFF) + record->rec_type;
+
+  for (index = 0; index < record->rec_data_len; index++)
+  {
+    record->rec_data[index] = ConvertHexASCIIByteToByte(inputRecord[9 + (index * 2)], inputRecord[9 + (index * 2) + 1]);
+    record->calc_checksum += record->rec_data[index];
+  }
+
+  record->calc_checksum = ~record->calc_checksum + 1;
+
+  if (record->calc_checksum != record->rec_checksum)
+  {
+    return HEX_REC_BAD_CHECKSUM;
+  }
+
+  if (record->rec_type == HEX_REC_TYPE_EOF)
+  {
+    return HEX_REC_EOF;
+  }
+
+  return HEX_REC_OK;
 }

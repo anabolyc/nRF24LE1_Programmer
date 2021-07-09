@@ -1,3 +1,54 @@
+/*
+  Arduino Uno connections:
+
+  See nRF24LE1 Product Specification for corresponding pin numbers.
+
+  NOTE: nRF24LE1 is a 3.3V device.  Level converters are required to connect it to a
+  5V Arduino.
+
+ * D00: Serial RX
+ * D01: Serial TX
+ * D02:
+ *~D03:
+ * D04:
+ *~D05:
+ *~D06:
+ * D07: nRF24LE1 UART/RXD
+ * D08: nRF24LE1 PROG
+ *~D09: nRF24LE1 _RESET_
+ *~D10: nRF24LE1 FCSN, nRF24LE1 UART/TXD
+ *~D11: SPI MOSI, nRF24LE1 FMOSI
+ * D12: SPI MISO, nRF24LE1 FMISO
+ * D13: SPI SCK, On board Status LED, nRF24LE1 FSCK
+ * A0:
+ * A1:
+ * A2:
+ * A3:
+ * A4: I2C SDA
+ * A5: I2C SCL
+ * 5V:
+ * 3.3V: nRF24LE1 VDD
+ * AREF:
+ * GND:  nRF24LE1 VSS
+
+ (~ PWM)
+
+ Interupts:
+ 0:
+ 1:
+
+ Pin-Mapping:
+ Arduino	24Pin		32Pin		48Pin
+ D07 (RXD)	12 P0.6		10 P0.4		15 P1.1
+ D08 (PROG)	 5 PROG		 6 PROG		10 PROG
+ D09 (RESET)	13 RESET	19 RESET	30 RESET
+ D10 (FCSN,TXD)	11 P0.5		15 P1.1		22 P2.0
+ D11 (FMOSI)	 9 P0.3		13 P0.7		19 P1.5
+ D12 (FMISO)	10 P0.4		14 P1.0		20 P1.6
+ D13 (FSCK)	 8 P0.2		11 P0.5 	16 P1.2
+
+ */
+
 #include <SoftwareSerial.h>
 
 #define NRFTYPE 24
@@ -14,6 +65,7 @@
 
 SoftwareSerial nRF24LE1Serial(nRF24LE1_TXD, nRF24LE1_RXD);
 #define NRF24LE1_BAUD  19200
+#define PROG_BAUD  57600
 
 #define FLASH_TRIGGER   0x01    // Magic character to trigger uploading of flash
 
@@ -63,3 +115,7 @@ SoftwareSerial nRF24LE1Serial(nRF24LE1_TXD, nRF24LE1_RXD);
 #define HEX_REC_INVALID_FORMAT         -4
 #define HEX_REC_EOF                    -5
 
+void flash();
+byte ConvertHexASCIIDigitToByte(char c);
+byte ConvertHexASCIIByteToByte(char msb, char lsb);
+int ParseHexRecord(struct hexRecordStruct *record, char *inputRecord, int inputRecordLen);
