@@ -62,7 +62,6 @@ if (defined($ARGV[3])) {
   }
 }
 
-
 if ( (@ARGV < 2) || (!defined($nupp)) || (!defined($rdismb))) {
   print "Usage: $0 <Hex.file> <Arduino Serial Port> [NUPP] [RDISMB]\n";
   exit;

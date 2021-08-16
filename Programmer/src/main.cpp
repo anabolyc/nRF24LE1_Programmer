@@ -70,6 +70,10 @@ void setup()
   delay(10);
   digitalWrite(_RESET_, HIGH);
 
+  PINS_PROG_MODE_OFF;
+
+  Serial.println(F("Ready.."));
+
   nRF24LE1Serial.begin(NRF24LE1_BAUD);
 }
 
@@ -91,7 +95,9 @@ void loop()
     if (serialBuffer == FLASH_TRIGGER)
     {
       nRF24LE1Serial.end();
+      PINS_PROG_MODE_ON;
       flash();
+      PINS_PROG_MODE_OFF;
       nRF24LE1Serial.begin(NRF24LE1_BAUD);
     }
     else
@@ -104,20 +110,11 @@ void loop()
 
 void flash()
 {
-
   Serial.println("FLASH");
   // Initialise SPI
   SPI.setBitOrder(MSBFIRST);
   SPI.setDataMode(SPI_MODE0);
   SPI.setClockDivider(SPI_CLOCK_DIV4);
-
-  // Initialise control pins
-  pinMode(PROG, OUTPUT);
-  digitalWrite(PROG, LOW);
-  pinMode(_RESET_, OUTPUT);
-  digitalWrite(_RESET_, HIGH);
-  pinMode(_FCSN_, OUTPUT);
-  digitalWrite(_FCSN_, HIGH);
 
   SPI.begin();
 
