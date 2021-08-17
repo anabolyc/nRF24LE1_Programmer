@@ -64,7 +64,7 @@
 #define nRF24LE1_TXD 7  // nRF24LE1 UART/RXD
 
 SoftwareSerial nRF24LE1Serial(nRF24LE1_RXD, nRF24LE1_TXD);
-#define  19200
+#define NRF24LE1_BAUD 19200
 #define PROG_BAUD 57600
 
 #define FLASH_TRIGGER 0x01 // Magic chaNRF24LE1_BAUDracter to trigger uploading of flash
