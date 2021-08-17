@@ -1,5 +1,4 @@
 # nRF24LE1 Programmer
-===================
 
 Arduino sketches and Perl script to program flash on Nordic nRF24LE1 wireless SOC
 
